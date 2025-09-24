@@ -1,0 +1,12 @@
+{
+  "events": [
+    {
+      "id": "zoom-1",
+      "title": "Office Event — Zoom Session",
+      "date": "2025-10-10 3:00 PM",
+      "location": "Zoom",
+      "description": "Join our online event via Zoom. Click Register to open the Zoom registration page.",
+      "url": "https://arizona.zoom.us/meeting/register/7_s4zfHQR3O8oSG0L2fnVw"
+    }
+  ]
+}

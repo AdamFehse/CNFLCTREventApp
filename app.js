@@ -1,111 +1,263 @@
-const eventsEl = document.getElementById('events');
-const refreshBtn = document.getElementById('refresh');
-const subscribeBtn = document.getElementById('subscribe');
-const installBtn = document.getElementById('installBtn');
-// small status element to show installability hints (create if missing)
-let installStatus = document.getElementById('installStatus');
-if(!installStatus){
-  installStatus = document.createElement('div');
-  installStatus.id = 'installStatus';
-  installStatus.style.fontSize = '0.9rem';
-  installStatus.style.color = '#444';
-  installStatus.style.marginLeft = '8px';
-  if(installBtn && installBtn.parentNode) installBtn.parentNode.appendChild(installStatus);
-}
-
-async function fetchEvents(){
-  eventsEl.innerHTML = '<p class="loading">Loading events…</p>';
-  try{
-    const res = await fetch('events.json',{cache:'no-cache'});
-    if(!res.ok) throw new Error('Network response not ok');
-    const data = await res.json();
-    renderEvents(data.events || []);
-  }catch(err){
-    console.warn('Fetch events failed',err);
-    const cached = await caches.match('events.json');
-    if(cached){
-      const data = await cached.json();
-      renderEvents(data.events || []);
-    } else {
-      eventsEl.innerHTML = '<p class="loading">Unable to load events.</p>';
-    }
-  }
-}
-
-function renderEvents(list){
-  if(!list.length) { eventsEl.innerHTML='<p class="loading">No upcoming events.</p>'; return }
-  eventsEl.innerHTML = '';
-  list.forEach(ev => {
-    const div = document.createElement('article');
-    div.className = 'event';
-    div.innerHTML = `
-      <h3>${escapeHtml(ev.title)}</h3>
-      <div class="meta">${escapeHtml(ev.date)} · ${escapeHtml(ev.location || '')}</div>
-      <div class="desc">${escapeHtml(ev.description || '')}</div>
-      <a class="register" href="${ev.url}" target="_blank" rel="noopener">Register</a>
-    `;
-    eventsEl.appendChild(div);
+// Service Worker Registration
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js')
+      .then(registration => {
+        console.log('SW registered:', registration);
+      })
+      .catch(registrationError => {
+        console.log('SW registration failed:', registrationError);
+      });
   });
 }
 
-function escapeHtml(s){
-  if(!s) return '';
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+// PWA Install Prompt
+let deferredPrompt;
+const installBtn = document.getElementById('installBtn');
 
-refreshBtn.addEventListener('click', () => fetchEvents());
-
-subscribeBtn.addEventListener('click', async () => {
-  // For now just prompt permission — actual push wiring is separate
-  const p = await Notification.requestPermission();
-  if(p === 'granted') subscribeBtn.textContent = 'Notifications Enabled';
-});
-
-// Register service worker
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('service-worker.js').then(() => console.log('SW registered'))
-}
-
-fetchEvents();
-
-// Handle PWA install prompt
-let deferredPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
-  // Prevent automatic prompt
   e.preventDefault();
   deferredPrompt = e;
-  if(installBtn){
-    installBtn.style.display = 'inline-block';
-    installBtn.addEventListener('click', async () => {
-      // If for some reason the prompt isn't available, show helpful message
-      if(!deferredPrompt){
-        alert('Install prompt not available. Make sure you are running the page from localhost or HTTPS and that your browser supports PWA installation.');
-        return;
+  installBtn.style.display = 'inline-block';
+  console.log('beforeinstallprompt fired');
+});
+
+installBtn.addEventListener('click', async () => {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User response to the install prompt: ${outcome}`);
+    deferredPrompt = null;
+    installBtn.style.display = 'none';
+  }
+});
+
+// Notification Permission
+const subscribeBtn = document.getElementById('subscribe');
+
+subscribeBtn.addEventListener('click', async () => {
+  if ('Notification' in window) {
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      subscribeBtn.textContent = 'Notifications Enabled';
+      subscribeBtn.disabled = true;
+      new Notification('Office Events', {
+        body: 'You will now receive event notifications!',
+        icon: 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"%3E%3Crect width="192" height="192" fill="%230066cc"/%3E%3Ctext x="96" y="110" text-anchor="middle" font-size="72" fill="white" font-family="Arial"%3EE%3C/text%3E%3C/svg%3E'
+      });
+    } else {
+      alert('Notifications permission denied');
+    }
+  } else {
+    alert('This browser does not support notifications');
+  }
+});
+
+// Check if notifications are already enabled
+if ('Notification' in window && Notification.permission === 'granted') {
+  subscribeBtn.textContent = 'Notifications Enabled';
+  subscribeBtn.disabled = true;
+}
+
+// App functionality
+class EventsApp {
+  constructor() {
+    this.eventsContainer = document.getElementById('events');
+    this.refreshBtn = document.getElementById('refresh');
+    this.init();
+  }
+
+  init() {
+    this.loadEvents();
+    this.refreshBtn.addEventListener('click', () => this.loadEvents());
+    
+    // Auto-refresh every 5 minutes
+    setInterval(() => this.loadEvents(), 5 * 60 * 1000);
+  }
+
+  async loadEvents() {
+    try {
+      this.eventsContainer.innerHTML = '<p class="loading">Loading events...</p>';
+      
+      const response = await fetch('events.json', {
+        cache: 'no-cache'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
-      installBtn.style.display = 'none';
-      try{
-        deferredPrompt.prompt();
-        const choice = await deferredPrompt.userChoice;
-        console.log('userChoice', choice);
-      }catch(err){
-        console.warn('Install prompt failed', err);
-        alert('Install prompt failed — check the console for details.');
-      }
-      deferredPrompt = null;
+      
+      const data = await response.json();
+      this.renderEvents(data.events);
+      
+    } catch (error) {
+      console.error('Error loading events:', error);
+      this.eventsContainer.innerHTML = `
+        <div class="error">
+          <strong>Error loading events:</strong> ${error.message}
+          <br>Please check your connection and try again.
+        </div>
+      `;
+    }
+  }
+
+  renderEvents(events) {
+    if (!events || events.length === 0) {
+      this.eventsContainer.innerHTML = '<p class="loading">No events scheduled.</p>';
+      return;
+    }
+
+    // Sort events by date
+    const sortedEvents = events.sort((a, b) => {
+      return new Date(a.date + ' ' + a.time) - new Date(b.date + ' ' + b.time);
     });
-    installStatus.textContent = 'Install available';
+
+    const eventsHTML = sortedEvents.map(event => this.createEventCard(event)).join('');
+    this.eventsContainer.innerHTML = eventsHTML;
+  }
+
+  createEventCard(event) {
+    const eventDate = new Date(event.date + ' ' + event.time);
+    const now = new Date();
+    const isPastEvent = eventDate < now;
+    
+    const formattedDate = eventDate.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+    
+    const formattedTime = eventDate.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+
+    const spotsLeft = event.capacity - event.registered;
+    const capacityClass = spotsLeft <= 5 ? 'text-warning' : '';
+    const isFullyBooked = spotsLeft <= 0;
+
+    return `
+      <div class="event-card ${isPastEvent ? 'opacity-50' : ''}">
+        <div class="event-title">${this.escapeHtml(event.title)}</div>
+        <div class="event-datetime">${formattedDate} at ${formattedTime}</div>
+        <div class="event-location">📍 ${this.escapeHtml(event.location)}</div>
+        <div class="event-description">${this.escapeHtml(event.description)}</div>
+        
+        <div class="event-registration">
+          ${!isPastEvent && !isFullyBooked ? `
+            <a href="${event.registrationUrl}" 
+               target="_blank" 
+               class="registration-button"
+               rel="noopener noreferrer">
+              Register Now
+            </a>
+          ` : `
+            <span class="registration-button" style="background: #6c757d; cursor: not-allowed;">
+              ${isPastEvent ? 'Event Passed' : 'Fully Booked'}
+            </span>
+          `}
+          
+          <div class="capacity-info ${capacityClass}">
+            ${event.registered}/${event.capacity} registered
+            ${!isPastEvent && !isFullyBooked ? `<br><strong>${spotsLeft} spots left</strong>` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+}
+
+// Initialize the app when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+  new EventsApp();
+});
+
+
+console.log('DEBUG: New app.js version loaded with polling');
+
+// --- ntfy UI wiring: ensure handlers attach after DOM is ready ---
+document.addEventListener('DOMContentLoaded', () => {
+  const ntfyTopicEl = document.getElementById('ntfyTopic');
+  const ntfyCreateBtn = document.getElementById('ntfyCreate');
+  const ntfySubscribeBtn = document.getElementById('ntfySubscribe');
+  const ntfyUnsubscribeBtn = document.getElementById('ntfyUnsubscribe');
+  const ntfyStatus = document.getElementById('ntfyStatus');
+  const ntfyLog = document.getElementById('ntfyLog');
+
+  function randomTopic(){ return 'office-events-' + Math.random().toString(36).slice(2,8); }
+
+  if(ntfyCreateBtn){
+    ntfyCreateBtn.addEventListener('click', () => { if(ntfyTopicEl) ntfyTopicEl.value = randomTopic(); });
+  }
+
+  if(ntfySubscribeBtn){
+    ntfySubscribeBtn.addEventListener('click', async () => {
+      console.log('Manual click handler working');
+      const topic = ntfyTopicEl && ntfyTopicEl.value && ntfyTopicEl.value.trim();
+      if(!topic){ if(ntfyStatus) ntfyStatus.textContent = 'Enter a topic first'; return }
+
+      if(Notification.permission !== 'granted'){
+        const p = await Notification.requestPermission();
+        if(p !== 'granted'){ if(ntfyStatus) ntfyStatus.textContent = 'Notifications permission required'; return }
+      }
+
+      // clear any existing poll
+      if(window.ntfyPollInterval){ clearInterval(window.ntfyPollInterval); window.ntfyPollInterval = null }
+
+      if(ntfyStatus) ntfyStatus.textContent = 'Connected to ' + topic + ' (polling)';
+
+      let lastSeenTime = Math.floor(Date.now()/1000);
+      window.ntfyPollInterval = setInterval(async () => {
+        try{
+          const resp = await fetch(`https://ntfy.sh/${topic}/json?poll=1&since=${lastSeenTime}`, { method: 'GET' });
+          if(!resp.ok) return;
+          const text = await resp.text();
+          if(!text.trim()) return;
+          const messages = text.trim().split('\n');
+          messages.forEach(line => {
+            try{
+              const data = JSON.parse(line);
+              // Only process messages newer than lastSeenTime
+              if(data.message && data.time > lastSeenTime){
+                const title = data.title || 'Office Event';
+                new Notification(title, { body: data.message });
+                console.log('✅ Notification shown:', title, data.message);
+                if(ntfyLog){
+                  if(ntfyLog.firstChild && ntfyLog.firstChild.textContent === 'No messages yet') ntfyLog.innerHTML = '';
+                  const div = document.createElement('div');
+                  div.textContent = `[${new Date(data.time*1000).toLocaleTimeString()}] ${title}: ${data.message}`;
+                  ntfyLog.appendChild(div);
+                  ntfyLog.scrollTop = ntfyLog.scrollHeight;
+                }
+                // update lastSeenTime so we don't show this message again
+                if (data.time && data.time > lastSeenTime) {
+                  lastSeenTime = data.time;
+                }
+              }
+            }catch(e){ /* ignore invalid json */ }
+          });
+        }catch(err){
+          console.warn('ntfy polling error', err);
+          if(ntfyStatus) ntfyStatus.textContent = 'Connection error - retrying...';
+        }
+      }, 3000);
+    });
+  }
+
+  if(ntfyUnsubscribeBtn){
+    ntfyUnsubscribeBtn.addEventListener('click', () => {
+      if(window.ntfyPollInterval){ clearInterval(window.ntfyPollInterval); window.ntfyPollInterval = null }
+      if(ntfyStatus) ntfyStatus.textContent = 'Disconnected';
+      if(ntfyLog){ const p = document.createElement('div'); p.textContent = `[${new Date().toLocaleTimeString()}] Unsubscribed`; ntfyLog.appendChild(p); ntfyLog.scrollTop = ntfyLog.scrollHeight; }
+    });
   }
 });
 
-window.addEventListener('appinstalled', () => {
-  console.log('PWA was installed');
-  if(installStatus) installStatus.textContent = 'App installed';
-});
-
-// Helpful hint if beforeinstallprompt never fired
-setTimeout(() => {
-  if(!deferredPrompt){
-    if(installStatus) installStatus.textContent = 'Install not available — serve over localhost/HTTPS and ensure manifest + service worker are valid';
-    console.info('beforeinstallprompt not fired — check manifest, service worker, and that you are on localhost or HTTPS.');
-  }
-}, 1500);

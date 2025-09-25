@@ -24,6 +24,19 @@
       <button id="installBtn" style="display:none">Install App</button>
     </div>
 
+    <!-- ntfy integration panel -->
+    <div class="ntfy-panel" style="background:white;padding:12px;border-radius:8px;margin-bottom:12px;border:1px solid #eee;">
+      <h3 style="margin:0 0 8px 0">Push Notifications</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <input id="ntfyTopic" placeholder="office-events-j5tzwz" value="office-events-j5tzwz" style="padding:6px;border:1px solid #ddd;border-radius:4px;flex:1;min-width:200px;">
+        <button id="ntfyCreate">New Topic</button>
+        <button id="ntfySubscribe">Subscribe</button>
+        <button id="ntfyUnsubscribe">Unsubscribe</button>
+      </div>
+      <div id="ntfyStatus" style="font-size:0.85rem;color:#666;margin-top:6px;">Not connected</div>
+      <div id="ntfyLog" style="margin-top:8px;max-height:160px;overflow:auto;background:#fafafa;border:1px solid #eee;padding:8px;border-radius:6px;font-family:monospace;font-size:0.9rem;color:#222">No messages yet</div>
+    </div>
+
     <section id="events">
       <p class="loading">Loading events…</p>
     </section>
